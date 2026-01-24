@@ -809,6 +809,16 @@ h1, h2, h3, h4 {
     gap: 16px;
 }
 
+.gallery-grid-even {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+}
+
+.gallery-grid-even .gallery-item {
+    aspect-ratio: 16 / 10;
+}
+
 .gallery-subtitle {
     font-size: 1.1rem;
     font-weight: 600;
@@ -969,6 +979,10 @@ h1, h2, h3, h4 {
         grid-template-columns: repeat(2, 1fr);
     }
 
+    .gallery-grid-even {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
     .gallery-item--large {
         grid-column: span 2;
         grid-row: span 1;
@@ -1050,6 +1064,10 @@ h1, h2, h3, h4 {
     }
 
     .gallery-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .gallery-grid-even {
         grid-template-columns: 1fr;
     }
 
