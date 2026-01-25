@@ -109,4 +109,96 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.drawings-grid .drawing-card').forEach((card, index) => {
         card.style.transitionDelay = `${index * 0.1}s`;
     });
+
+    // Lightbox functionality for enlarging images
+    createLightbox();
 });
+
+/**
+ * Lightbox - Click to enlarge images
+ */
+function createLightbox() {
+    // Create lightbox elements
+    const lightbox = document.createElement('div');
+    lightbox.className = 'lightbox';
+    lightbox.innerHTML = `
+        <div class="lightbox-backdrop"></div>
+        <div class="lightbox-content">
+            <button class="lightbox-close" aria-label="Close">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 6L6 18M6 6l12 12"/>
+                </svg>
+            </button>
+            <img class="lightbox-image" src="" alt="">
+            <p class="lightbox-caption"></p>
+        </div>
+    `;
+    document.body.appendChild(lightbox);
+
+    const lightboxImage = lightbox.querySelector('.lightbox-image');
+    const lightboxCaption = lightbox.querySelector('.lightbox-caption');
+    const lightboxClose = lightbox.querySelector('.lightbox-close');
+    const lightboxBackdrop = lightbox.querySelector('.lightbox-backdrop');
+
+    // Find all enlargeable images (project images, gallery images, about photo)
+    const enlargeableImages = document.querySelectorAll(`
+        .project-gallery img,
+        .project-image img,
+        .about-image img,
+        .gallery-item img
+    `);
+
+    enlargeableImages.forEach(img => {
+        // Add visual indicator that image is clickable
+        img.classList.add('enlargeable');
+        img.setAttribute('role', 'button');
+        img.setAttribute('tabindex', '0');
+        img.setAttribute('aria-label', 'Click to enlarge image');
+
+        // Click handler
+        img.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openLightbox(img);
+        });
+
+        // Keyboard handler
+        img.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                openLightbox(img);
+            }
+        });
+    });
+
+    function openLightbox(img) {
+        lightboxImage.src = img.src;
+        lightboxImage.alt = img.alt || '';
+        lightboxCaption.textContent = img.alt || '';
+        lightboxCaption.style.display = img.alt ? 'block' : 'none';
+        lightbox.classList.add('active');
+        document.body.style.overflow = 'hidden';
+
+        // Focus the close button for accessibility
+        setTimeout(() => lightboxClose.focus(), 100);
+    }
+
+    function closeLightbox() {
+        lightbox.classList.remove('active');
+        document.body.style.overflow = '';
+    }
+
+    // Close handlers
+    lightboxClose.addEventListener('click', closeLightbox);
+    lightboxBackdrop.addEventListener('click', closeLightbox);
+
+    // Close on escape key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && lightbox.classList.contains('active')) {
+            closeLightbox();
+        }
+    });
+
+    // Close when clicking the image (toggle behavior)
+    lightboxImage.addEventListener('click', closeLightbox);
+}
