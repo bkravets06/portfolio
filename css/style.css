@@ -54,6 +54,15 @@
         --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.5);
     }
 
+    /* Hero section header in dark mode */
+    .hero {
+        background: linear-gradient(135deg, var(--color-bg) 0%, var(--color-blue-light) 100%);
+    }
+
+    .hero::before {
+        background: radial-gradient(ellipse, rgba(90, 180, 255, 0.1) 0%, transparent 70%);
+    }
+
     /* Navbar adjustments for dark mode */
     .navbar {
         background: rgba(15, 15, 26, 0.95);
@@ -63,14 +72,48 @@
         background: rgba(15, 15, 26, 0.98);
     }
 
+    /* View Resume button (secondary button) in dark mode */
+    .btn--secondary {
+        background: var(--color-bg-alt);
+        color: var(--color-text);
+        border-color: var(--color-border);
+    }
+
+    .btn--secondary:hover {
+        border-color: var(--color-blue);
+        color: var(--color-blue);
+    }
+
     /* Project cards in dark mode */
     .project-card {
+        background: var(--color-bg-alt);
+    }
+
+    /* Project titles in dark mode */
+    .project-title {
+        color: var(--color-text);
+    }
+
+    .project-content {
         background: var(--color-bg-alt);
     }
 
     /* Footer in dark mode */
     .footer {
         background: #0a0a12;
+        color: #f0f0f5;
+    }
+
+    .footer-tagline {
+        color: rgba(240, 240, 245, 0.6);
+    }
+
+    .footer-contact-item {
+        color: rgba(240, 240, 245, 0.8);
+    }
+
+    .footer-bottom p {
+        color: rgba(240, 240, 245, 0.5);
     }
 
     /* Image placeholder adjustments */
