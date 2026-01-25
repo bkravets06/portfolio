@@ -1,0 +1,6 @@
+# robots.txt for bjkravets.com
+User-agent: *
+Allow: /
+
+# Sitemap location
+Sitemap: https://bjkravets.com/sitemap.xml
