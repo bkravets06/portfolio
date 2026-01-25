@@ -56,7 +56,7 @@
 
     /* Hero section header in dark mode */
     .hero {
-        background: linear-gradient(135deg, var(--color-bg) 0%, var(--color-blue-light) 100%);
+        background: linear-gradient(135deg, #0f0f1a 0%, #1a2a3a 100%);
     }
 
     .hero::before {
@@ -74,14 +74,15 @@
 
     /* View Resume button (secondary button) in dark mode */
     .btn--secondary {
-        background: var(--color-bg-alt);
-        color: var(--color-text);
-        border-color: var(--color-border);
+        background: #1a1a2e;
+        color: #f0f0f5;
+        border-color: #2a2a40;
     }
 
     .btn--secondary:hover {
-        border-color: var(--color-blue);
-        color: var(--color-blue);
+        border-color: #5AB4FF;
+        color: #5AB4FF;
+        background: #1a1a2e;
     }
 
     /* Project cards in dark mode */
@@ -128,7 +129,7 @@
 
     /* Project header gradient */
     .project-header {
-        background: linear-gradient(135deg, var(--color-bg) 0%, var(--color-blue-light) 100%);
+        background: linear-gradient(135deg, #0f0f1a 0%, #1a2a3a 100%);
     }
 }
 
@@ -353,7 +354,7 @@ h1, h2, h3, h4 {
 }
 
 .btn--secondary {
-    background: white;
+    background: var(--color-bg);
     color: var(--color-text);
     border: 2px solid var(--color-border);
 }
