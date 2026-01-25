@@ -16,9 +16,9 @@
         <div class="nav-container">
             <a href="#" class="nav-logo">BK</a>
             <ul class="nav-menu">
+                <li><a href="#about" class="nav-link">About</a></li>
                 <li><a href="#projects" class="nav-link">Projects</a></li>
                 <li><a href="#resume" class="nav-link">Resume</a></li>
-                <li><a href="#drawings" class="nav-link">Technical Drawings</a></li>
                 <li><a href="#contact" class="nav-link">Contact</a></li>
             </ul>
             <button class="nav-toggle" aria-label="Toggle menu">
@@ -41,6 +41,45 @@
             </div>
         </div>
     </header>
+
+    <!-- About Me Section -->
+    <section id="about" class="section about">
+        <div class="container">
+            <span class="section-label">Introduction</span>
+            <h2 class="section-title">About Me</h2>
+
+            <div class="about-grid">
+                <div class="about-image">
+                    <div class="about-image-placeholder">
+                        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                            <circle cx="12" cy="7" r="4"/>
+                        </svg>
+                        <span>Photo Coming Soon</span>
+                    </div>
+                </div>
+                <div class="about-content">
+                    <p class="about-bio">
+                        I'm an Engineering Physics major at Tulane University with a passion for hands-on engineering and problem-solving. Through my coursework and extracurricular projects, I've developed skills in CAD design, prototyping, electronics, and manufacturing.
+                    </p>
+
+                    <div class="about-involvement">
+                        <h3>Campus Involvement</h3>
+                        <ul class="involvement-list">
+                            <li>
+                                <span class="involvement-role">FabTech</span>
+                                <span class="involvement-org">Tulane MakerSpace</span>
+                            </li>
+                            <li>
+                                <span class="involvement-role">Member</span>
+                                <span class="involvement-org">Add your organizations here</span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
 
     <!-- Projects Section -->
     <section id="projects" class="section projects">
@@ -252,89 +291,6 @@
                 </svg>
                 Download Full Resume (PDF)
             </a>
-        </div>
-    </section>
-
-    <!-- Technical Drawings Section -->
-    <section id="drawings" class="section drawings">
-        <div class="container">
-            <span class="section-label">Documentation</span>
-            <h2 class="section-title">Technical Drawings</h2>
-            <p class="section-description">Sample CAD drawings and technical documentation demonstrating precision drafting and GD&T proficiency.</p>
-
-            <div class="drawings-grid">
-                <article class="drawing-card">
-                    <div class="drawing-preview">
-                        <div class="drawing-placeholder">
-                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                <polyline points="14,2 14,8 20,8"/>
-                                <line x1="16" y1="13" x2="8" y2="13"/>
-                                <line x1="16" y1="17" x2="8" y2="17"/>
-                            </svg>
-                        </div>
-                    </div>
-                    <div class="drawing-info">
-                        <h3>Assembly Drawing - Gearbox</h3>
-                        <p>Complete assembly documentation with BOM</p>
-                        <span class="drawing-format">PDF / DWG</span>
-                    </div>
-                </article>
-
-                <article class="drawing-card">
-                    <div class="drawing-preview">
-                        <div class="drawing-placeholder">
-                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                <polyline points="14,2 14,8 20,8"/>
-                                <line x1="16" y1="13" x2="8" y2="13"/>
-                                <line x1="16" y1="17" x2="8" y2="17"/>
-                            </svg>
-                        </div>
-                    </div>
-                    <div class="drawing-info">
-                        <h3>Detail Drawing - Shaft</h3>
-                        <p>Fully dimensioned with GD&T callouts</p>
-                        <span class="drawing-format">PDF / DWG</span>
-                    </div>
-                </article>
-
-                <article class="drawing-card">
-                    <div class="drawing-preview">
-                        <div class="drawing-placeholder">
-                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                <polyline points="14,2 14,8 20,8"/>
-                                <line x1="16" y1="13" x2="8" y2="13"/>
-                                <line x1="16" y1="17" x2="8" y2="17"/>
-                            </svg>
-                        </div>
-                    </div>
-                    <div class="drawing-info">
-                        <h3>Weldment Drawing - Frame</h3>
-                        <p>Structural steel frame with weld symbols</p>
-                        <span class="drawing-format">PDF / DWG</span>
-                    </div>
-                </article>
-
-                <article class="drawing-card">
-                    <div class="drawing-preview">
-                        <div class="drawing-placeholder">
-                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                <polyline points="14,2 14,8 20,8"/>
-                                <line x1="16" y1="13" x2="8" y2="13"/>
-                                <line x1="16" y1="17" x2="8" y2="17"/>
-                            </svg>
-                        </div>
-                    </div>
-                    <div class="drawing-info">
-                        <h3>Sheet Metal Drawing</h3>
-                        <p>Flat pattern with bend allowances</p>
-                        <span class="drawing-format">PDF / DWG</span>
-                    </div>
-                </article>
-            </div>
         </div>
     </section>
 

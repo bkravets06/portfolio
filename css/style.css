@@ -421,6 +421,106 @@ h1, h2, h3, h4 {
     transform: translateX(2px);
 }
 
+/* About Section */
+.about {
+    background: var(--color-bg-alt);
+}
+
+.about-grid {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    gap: 60px;
+    margin-top: 48px;
+    align-items: start;
+}
+
+.about-image {
+    position: sticky;
+    top: 100px;
+}
+
+.about-image-placeholder {
+    width: 100%;
+    aspect-ratio: 1;
+    background: linear-gradient(135deg, var(--color-blue-light) 0%, var(--color-bg) 100%);
+    border-radius: var(--radius-lg);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    color: var(--color-text-muted);
+    border: 2px dashed var(--color-border);
+}
+
+.about-image-placeholder span {
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.about-image img {
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: cover;
+    border-radius: var(--radius-lg);
+}
+
+.about-content {
+    max-width: 700px;
+}
+
+.about-bio {
+    font-size: 1.1rem;
+    line-height: 1.8;
+    color: var(--color-text-secondary);
+    margin-bottom: 40px;
+}
+
+.about-involvement {
+    background: var(--color-bg);
+    padding: 32px;
+    border-radius: var(--radius-lg);
+    border-left: 4px solid var(--color-yellow);
+}
+
+.about-involvement h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--color-blue);
+    margin-bottom: 20px;
+}
+
+.involvement-list {
+    list-style: none;
+}
+
+.involvement-list li {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.involvement-list li:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.involvement-list li:first-child {
+    padding-top: 0;
+}
+
+.involvement-role {
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.involvement-org {
+    font-size: 0.9rem;
+    color: var(--color-text-secondary);
+}
+
 /* Resume Section */
 .resume-grid {
     display: grid;
@@ -989,6 +1089,11 @@ h1, h2, h3, h4 {
 
 /* Responsive Design */
 @media (max-width: 1024px) {
+    .about-grid {
+        grid-template-columns: 200px 1fr;
+        gap: 40px;
+    }
+
     .project-grid {
         grid-template-columns: 1fr;
     }
@@ -1080,6 +1185,24 @@ h1, h2, h3, h4 {
 
     .footer-contact-links {
         align-items: center;
+    }
+
+    .about-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .about-image {
+        position: static;
+        max-width: 250px;
+        margin: 0 auto;
+    }
+
+    .about-content {
+        text-align: center;
+    }
+
+    .about-involvement {
+        text-align: left;
     }
 
     .drawings-grid {
