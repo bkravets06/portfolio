@@ -32,6 +32,63 @@
     --transition: 0.3s ease;
 }
 
+/* Dark Mode - Auto-detects system preference */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --color-blue: #5AB4FF;
+        --color-blue-dark: #4CA7F8;
+        --color-blue-light: #1a2a3a;
+        --color-yellow: #F4BF45;
+        --color-yellow-dark: #d9a832;
+        --color-yellow-light: #2a2520;
+
+        --color-text: #f0f0f5;
+        --color-text-secondary: #b0b0c0;
+        --color-text-muted: #7878a0;
+        --color-bg: #0f0f1a;
+        --color-bg-alt: #1a1a2e;
+        --color-border: #2a2a40;
+
+        --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+        --shadow-md: 0 4px 24px rgba(0, 0, 0, 0.4);
+        --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.5);
+    }
+
+    /* Navbar adjustments for dark mode */
+    .navbar {
+        background: rgba(15, 15, 26, 0.95);
+    }
+
+    .navbar.scrolled {
+        background: rgba(15, 15, 26, 0.98);
+    }
+
+    /* Project cards in dark mode */
+    .project-card {
+        background: var(--color-bg-alt);
+    }
+
+    /* Footer in dark mode */
+    .footer {
+        background: #0a0a12;
+    }
+
+    /* Image placeholder adjustments */
+    .project-image-placeholder {
+        background: linear-gradient(135deg, var(--color-blue-light) 0%, var(--color-bg-alt) 100%);
+    }
+
+    /* About section image placeholder */
+    .about-image-placeholder {
+        background: linear-gradient(135deg, var(--color-blue-light) 0%, var(--color-bg-alt) 100%);
+    }
+
+    /* Project header gradient */
+    .project-header {
+        background: linear-gradient(135deg, var(--color-bg) 0%, var(--color-blue-light) 100%);
+    }
+}
+
 /* Reset & Base */
 *, *::before, *::after {
     box-sizing: border-box;
