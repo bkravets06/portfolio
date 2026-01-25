@@ -635,6 +635,10 @@ h1, h2, h3, h4 {
     letter-spacing: -0.02em;
 }
 
+.footer-logo--text {
+    font-size: 1.5rem;
+}
+
 .footer-tagline {
     font-size: 0.95rem;
     color: rgba(255, 255, 255, 0.6);
