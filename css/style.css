@@ -65,11 +65,21 @@
 
     /* Navbar adjustments for dark mode */
     .navbar {
-        background: rgba(15, 15, 26, 0.95);
+        background: rgba(15, 15, 26, 0.95) !important;
+        border-bottom-color: #2a2a40;
     }
 
     .navbar.scrolled {
-        background: rgba(15, 15, 26, 0.98);
+        background: rgba(15, 15, 26, 0.98) !important;
+    }
+
+    /* Mobile menu in dark mode */
+    .nav-menu.active {
+        background: #0f0f1a;
+    }
+
+    .nav-toggle span {
+        background: #f0f0f5;
     }
 
     /* View Resume button (secondary button) in dark mode */
