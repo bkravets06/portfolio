@@ -140,10 +140,10 @@ function createLightbox() {
     const lightboxClose = lightbox.querySelector('.lightbox-close');
     const lightboxBackdrop = lightbox.querySelector('.lightbox-backdrop');
 
-    // Find all enlargeable images (project images, gallery images, about photo)
+    // Find all enlargeable images (project detail gallery images, about photo)
+    // Excludes .project-card images on main page so they remain clickable links
     const enlargeableImages = document.querySelectorAll(`
         .project-gallery img,
-        .project-image img,
         .about-image img,
         .gallery-item img
     `);
