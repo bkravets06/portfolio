@@ -794,6 +794,17 @@ h1, h2, h3, h4 {
     margin-bottom: 64px;
 }
 
+.project-download {
+    margin-bottom: 64px;
+}
+
+.project-download h2 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-bottom: 24px;
+    color: var(--color-blue);
+}
+
 .project-gallery h2 {
     font-size: 1.5rem;
     font-weight: 600;
