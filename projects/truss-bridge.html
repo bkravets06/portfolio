@@ -9,6 +9,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- 3D Model Viewer -->
+    <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
 </head>
 <body>
     <!-- Navigation -->
@@ -72,6 +74,38 @@
                 <p>
                     During the testing of Truss Bridges, we ended up supporting a maximum weight of 111 lbs, which won us the 2nd Place Overall Weight award. We also won the Judges Award for our use of Fusion360 and FEA to rapidly prototype our bridge.
                 </p>
+            </div>
+
+            <!-- 3D Model Viewer -->
+            <div class="project-model-viewer">
+                <h2>3D Model</h2>
+                <p class="model-viewer-hint">Drag to rotate. Scroll to zoom. Two-finger drag to pan.</p>
+                <div class="model-viewer-container">
+                    <model-viewer
+                        src="../assets/models/truss-bridge/model.glb"
+                        alt="3D model of the K-Truss bridge"
+                        camera-controls
+                        touch-action="pan-y"
+                        auto-rotate
+                        shadow-intensity="1"
+                        camera-orbit="45deg 55deg 105%"
+                        min-camera-orbit="auto auto 50%"
+                        max-camera-orbit="auto auto 200%"
+                        interaction-prompt="auto"
+                        ar-status="not-presenting"
+                        loading="lazy"
+                        style="width: 100%; height: 100%;"
+                    >
+                        <div class="model-viewer-loading" slot="poster">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+                                <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+                                <line x1="12" y1="22.08" x2="12" y2="12"/>
+                            </svg>
+                            <span>Loading 3D Model...</span>
+                        </div>
+                    </model-viewer>
+                </div>
             </div>
 
             <!-- Photo Gallery -->
