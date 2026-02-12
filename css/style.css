@@ -95,18 +95,13 @@
         background: #1a1a2e;
     }
 
-    /* Project cards in dark mode */
-    .project-card {
-        background: var(--color-bg-alt);
-    }
-
     /* Project titles in dark mode */
     .project-title {
         color: var(--color-text);
     }
 
     .project-content {
-        background: var(--color-bg-alt);
+        background: var(--color-bg);
     }
 
     /* Footer in dark mode */
@@ -421,7 +416,7 @@ h1, h2, h3, h4 {
 }
 
 .project-card {
-    background: white;
+    background: var(--color-bg);
     border-radius: var(--radius-lg);
     overflow: hidden;
     box-shadow: var(--shadow-sm);
@@ -762,7 +757,7 @@ h1, h2, h3, h4 {
 }
 
 .drawing-card {
-    background: white;
+    background: var(--color-bg);
     border-radius: var(--radius-md);
     overflow: hidden;
     box-shadow: var(--shadow-sm);
