@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>model engine test</title>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js",
+            "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/"}}
+</script>
+<style>
+  body { font: 13px/1.4 ui-monospace, Menlo, monospace; margin: 16px; }
+  #log { white-space: pre-wrap; border: 1px solid #aaa; padding: 8px; min-height: 200px; }
+  .ok { color: #050; } .err { color: #a00; } .warn { color: #850; }
+  button { margin-right: 6px; }
+</style>
+</head>
+<body>
+<h1>model engine test</h1>
+<p>
+  <input type="file" id="pick" multiple>
+  <button id="run">Detect picked</button>
+  <button id="matrix">Run read matrix</button>
+  <button id="write">Run write matrix</button>
+  <button id="errors">Run error paths</button>
+  <button id="routing">Run model.js routing</button>
+  <button id="all">Run everything</button>
+</p>
+<div id="log"></div>
+<script type="module">
+  const logEl = document.getElementById('log');
+  window.log = (msg, cls = '') => {
+    const line = document.createElement('div');
+    line.className = cls;
+    line.textContent = typeof msg === 'string' ? msg : JSON.stringify(msg);
+    logEl.appendChild(line);
+    console.log(msg);
+  };
+  window.results = {};
+
+  window.sample = async (name, type = '') => {
+    const res = await fetch(`/file/_dev/samples/${name}?v=${Date.now()}`);
+    if (!res.ok) throw new Error(`sample ${name}: HTTP ${res.status}`);
+    return new File([await res.blob()], name, { type });
+  };
+  window.head = async (file) => new Uint8Array(await file.slice(0, 64).arrayBuffer());
+  window.engine = (name) => import(`../engines/${name}.js?v=${Date.now()}`);
+
+  // Expected geometry per sample (triangles, bbox min/max) -----------------
+  const CUBE = { tris: 12, min: [-5, -5, -5], max: [5, 5, 5] };
+  const TORUS = { tris: 4096, min: [-26, -26, -6], max: [26, 26, 6] };
+  // The DAE samples declare meter=0.001 and Z_UP and cube.usda declares metersPerUnit=0.001:
+  // the engine undoes the loaders' root scaling/rotation, so raw coordinates come back (units 'mm').
+  const CUBE_DAE = CUBE;
+  const TORUS_DAE = TORUS;
+  const BOX = { tris: 12, min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] };
+  const TWO = { tris: 4108, min: [-5, -26, -6], max: [66, 26, 6] };
+  window.READ_SAMPLES = {
+    'cube.stl': CUBE, 'cube_ascii.stl': CUBE, 'cube.obj': CUBE, 'cube.ply': CUBE, 'cube.amf': CUBE,
+    'cube.dae': CUBE_DAE, 'cube.wrl': CUBE, 'cube.3mf': CUBE, 'cube.fbx': CUBE, 'cube.glb': CUBE,
+    'cube.gltf': CUBE, 'cube.usdz': CUBE,
+    'torus.stl': TORUS, 'torus_ascii.stl': TORUS, 'torus.obj': TORUS, 'torus.ply': TORUS, 'torus.amf': TORUS,
+    'torus.dae': TORUS_DAE, 'torus.wrl': TORUS, 'torus.3mf': TORUS, 'torus.fbx': TORUS, 'torus.glb': TORUS,
+    'torus.gltf': TORUS, 'torus.usdz': TORUS,
+    'threejs_vCube.fbx': null, 'threejs_monkey.fbx': null, 'threejs_morph_test.fbx': null, 'threejs_RotationTest.fbx': null,
+    'torus_200k.stl': { tris: 200000, min: [-26, -26, -6], max: [26, 26, 6] },
+    'two_bodies.obj': TWO, 'two_bodies.3mf': TWO, 'cube.usda': CUBE, 'cube_ktx2.glb': CUBE, 'box_draco.glb': BOX,
+  };
+  window.ERROR_SAMPLES = [
+    ['garbage.bin', 'stl'], ['garbage.bin', 'obj'], ['garbage.bin', 'ply'], ['garbage.bin', 'glb'], ['garbage.bin', 'gltf'],
+    ['garbage.bin', '3mf'], ['garbage.bin', 'amf'], ['garbage.bin', 'dae'], ['garbage.bin', 'fbx'], ['garbage.bin', 'wrl'],
+    ['garbage.bin', 'usdz'], ['garbage.bin', 'usd'],
+    ['garbage.txt', 'stl'], ['garbage.txt', 'obj'], ['garbage.txt', 'ply'], ['garbage.txt', 'gltf'], ['garbage.txt', 'dae'],
+    ['garbage.txt', 'fbx'], ['garbage.txt', 'wrl'], ['garbage.txt', '3mf'], ['garbage.txt', 'usdz'],
+    ['empty.stl', 'stl'], ['truncated.stl', 'stl'], ['pointcloud.ply', 'ply'], ['external.gltf', 'gltf'],
+    ['threejs_nurbs.fbx', 'fbx'],
+  ];
+
+  const close = (a, b, tol) => Math.abs(a - b) <= tol;
+  const bboxOk = (st, exp) => {
+    const tol = Math.max(1e-3, 1e-3 * Math.max(...exp.max.map(Math.abs)));
+    return [0, 1, 2].every((k) => close(st.min[k], exp.min[k], tol) && close(st.max[k], exp.max[k], tol));
+  };
+  const fmtStats = (st) => `${st.bodies} body/${st.triangles} tri/${st.vertices} v bbox [${st.min.map((x) => +x.toFixed(4))}]..[${st.max.map((x) => +x.toFixed(4))}] names=${st.names.slice(0, 3).join('|')}`;
+
+  window.runRead = async (names) => {
+    const mesh = await engine('model-mesh');
+    const out = {};
+    for (const name of names || Object.keys(READ_SAMPLES)) {
+      const exp = READ_SAMPLES[name];
+      try {
+        const file = await sample(name);
+        const id = mesh.detectMesh(file, await head(file));
+        const t0 = performance.now();
+        const ms = await mesh.readMesh(file, id);
+        const dt = Math.round(performance.now() - t0);
+        const st = mesh.meshSetStats(ms);
+        const ok = !exp || (st.triangles === exp.tris && bboxOk(st, exp));
+        out[name] = { detect: id, ok, ms: dt, units: ms.units, stats: fmtStats(st) };
+        log(`${ok ? 'OK  ' : 'FAIL'} read ${name} (${id}, ${dt} ms, ${ms.units}): ${fmtStats(st)}`, ok ? 'ok' : 'err');
+      } catch (e) {
+        out[name] = { error: String(e.message || e) };
+        log(`FAIL read ${name}: ${e.message || e}`, 'err');
+        console.error(e);
+      }
+    }
+    return out;
+  };
+
+  window.runWrite = async (sources, outputs) => {
+    const mesh = await engine('model-mesh');
+    const out = {};
+    sources = sources || ['cube.stl', 'torus.ply', 'cube.obj'];
+    outputs = outputs || [['stl', { binary: true }], ['stl', { binary: false }], ['obj', {}], ['ply', { binary: true }], ['ply', { binary: false }], ['glb', {}], ['gltf', {}], ['3mf', {}], ['usdz', {}]];
+    for (const src of sources) {
+      const file = await sample(src);
+      const ms = await mesh.readMesh(file, mesh.detectMesh(file, await head(file)));
+      const st0 = mesh.meshSetStats(ms);
+      for (const [outId, opts] of outputs) {
+        const key = `${src} -> ${outId}${opts.binary === false ? ' (ascii)' : ''}`;
+        try {
+          const t0 = performance.now();
+          const { blob, ext } = await mesh.writeMesh(ms, outId, opts);
+          const dt = Math.round(performance.now() - t0);
+          const back = new File([blob], `back.${ext}`, { type: blob.type });
+          const id2 = mesh.detectMesh(back, await head(back));
+          const ms2 = await mesh.readMesh(back, id2);
+          const st = mesh.meshSetStats(ms2);
+          const ok = st.triangles === st0.triangles && bboxOk(st, st0) && id2 === outId;
+          results[key] = blob;
+          out[key] = { ok, bytes: blob.size, ms: dt, redetect: id2, stats: fmtStats(st) };
+          log(`${ok ? 'OK  ' : 'FAIL'} ${key}: ${blob.size} B, ${dt} ms, back as ${id2}: ${fmtStats(st)}`, ok ? 'ok' : 'err');
+        } catch (e) {
+          out[key] = { error: String(e.message || e) };
+          log(`FAIL ${key}: ${e.message || e}`, 'err');
+          console.error(e);
+        }
+      }
+    }
+    return out;
+  };
+
+  window.runErrors = async () => {
+    const mesh = await engine('model-mesh');
+    const out = {};
+    for (const [name, id] of ERROR_SAMPLES) {
+      const key = `${name} as ${id}`;
+      try {
+        const ms = await mesh.readMesh(await sample(name), id);
+        out[key] = { ok: false, unexpected: fmtStats(mesh.meshSetStats(ms)) };
+        log(`FAIL ${key}: no error, got ${fmtStats(mesh.meshSetStats(ms))}`, 'err');
+      } catch (e) {
+        const readable = e instanceof Error && typeof e.message === 'string' && e.message.length > 10 && !/undefined|\[object/.test(e.message);
+        out[key] = { ok: readable, message: String(e.message || e) };
+        log(`${readable ? 'OK  ' : 'FAIL'} ${key}: ${e.message || e}`, readable ? 'ok' : 'err');
+      }
+    }
+    return out;
+  };
+
+  window.runRouting = async () => {
+    const model = await engine('model');
+    const out = { cadAvailableAtLoad: model.cadAvailable(), formatsAtLoad: model.formats.map((f) => f.id + ':' + f.group).join(' '), loadNoteAtLoad: model.loadNote };
+    const stub = await import('./model-cad-stub.js?v=' + Date.now());
+    model._setCadModule(stub);
+    out.formatsWithStub = model.formats.map((f) => f.id + (f.read ? 'r' : '') + (f.write ? 'w' : '')).join(' ');
+    out.loadNote = model.loadNote;
+    out.needsCad = [model.needsCad('stl', 'obj'), model.needsCad('step', 'stl'), model.needsCad('stl', 'step'), model.needsCad('step', 'iges')];
+    out.targets_stl = model.targets('stl');
+    out.targets_step = model.targets('step');
+    out.options = model.options.map((o) => `${o.id}:${o.type}=${o.default}`);
+    const stepFile = new File(['ISO-10303-21;\nHEADER;\n'], 'part.step');
+    const brepFile = new File(['DBRep_DrawableShape\n'], 'part.brep');
+    out.detect = { step: model.detect(stepFile, await head(stepFile)), brep: model.detect(brepFile, await head(brepFile)), stl: model.detect(await sample('cube.stl'), await head(await sample('cube.stl'))), igs: model.detect(new File(['x'], 'a.igs'), new Uint8Array([120])) };
+    await model.warmup('step', 'stl');
+    out.warmups = stub.warmups;
+    const mesh = await engine('model-mesh');
+    // mesh -> mesh with scale + merge (two bodies: read cube.obj twice via a group? use the 3MF with one body + scale)
+    const r1 = await model.convert({ file: await sample('torus.stl'), inputId: 'stl', outputId: 'glb', options: { scale: 2 }, onProgress: () => {} });
+    const b1 = new File([r1.blob], 'x.glb');
+    out.meshToMeshScaled = fmtStats(mesh.meshSetStats(await mesh.readMesh(b1, 'glb')));
+    // mesh -> cad
+    const r2 = await model.convert({ file: await sample('cube.stl'), inputId: 'stl', outputId: 'step', options: { scale: 1, deflection: 0.05 }, onProgress: () => {} });
+    out.meshToCad = await r2.blob.text();
+    // cad -> mesh (stub cube), scaled x10
+    const r3 = await model.convert({ file: stepFile, inputId: 'step', outputId: 'stl', options: { scale: 10, deflection: 0.2 }, onProgress: () => {} });
+    out.cadToMesh = fmtStats(mesh.meshSetStats(await mesh.readMesh(new File([r3.blob], 'x.stl'), 'stl')));
+    // cad -> cad
+    const r4 = await model.convert({ file: stepFile, inputId: 'step', outputId: 'iges', options: {}, onProgress: () => {} });
+    out.cadToCad = await r4.blob.text();
+    // merge: two-body OBJ -> 3MF with merge on (and off, to check names survive)
+    const multi = await sample('two_bodies.obj');
+    out.multiBodies = fmtStats(mesh.meshSetStats(await mesh.readMesh(multi, 'obj')));
+    const r5 = await model.convert({ file: multi, inputId: 'obj', outputId: '3mf', options: { merge: true }, onProgress: () => {} });
+    out.merged = fmtStats(mesh.meshSetStats(await mesh.readMesh(new File([r5.blob], 'x.3mf'), '3mf')));
+    const r6 = await model.convert({ file: multi, inputId: 'obj', outputId: '3mf', options: { merge: false }, onProgress: () => {} });
+    out.unmerged3mf = fmtStats(mesh.meshSetStats(await mesh.readMesh(new File([r6.blob], 'x.3mf'), '3mf')));
+    const r7 = await model.convert({ file: multi, inputId: 'obj', outputId: 'glb', options: {}, onProgress: () => {} });
+    out.unmergedGlb = fmtStats(mesh.meshSetStats(await mesh.readMesh(new File([r7.blob], 'x.glb'), 'glb')));
+    const r8 = await model.convert({ file: multi, inputId: 'obj', outputId: 'usdz', options: {}, onProgress: () => {} });
+    out.unmergedUsdz = fmtStats(mesh.meshSetStats(await mesh.readMesh(new File([r8.blob], 'x.usdz'), 'usdz')));
+    out.stubCalls = stub.calls;
+    // bad option
+    try { await model.convert({ file: await sample('cube.stl'), inputId: 'stl', outputId: 'obj', options: { scale: -1 } }); out.badScale = 'no error'; } catch (e) { out.badScale = e.message; }
+    // unknown format
+    try { await model.convert({ file: await sample('cube.stl'), inputId: 'stl', outputId: 'nope', options: {} }); out.badOut = 'no error'; } catch (e) { out.badOut = e.message; }
+    // CAD missing: inject null and try a CAD conversion
+    model._setCadModule(null);
+    out.formatsWithoutCad = model.formats.map((f) => f.id).join(' ');
+    try { await model.convert({ file: stepFile, inputId: 'step', outputId: 'stl', options: {} }); out.cadMissing = 'no error'; } catch (e) { out.cadMissing = e.message; }
+    log(JSON.stringify(out, null, 1));
+    return out;
+  };
+
+  document.getElementById('run').addEventListener('click', async () => {
+    try {
+      const eng = await engine('model');
+      log(`formats: ${eng.formats.map((f) => f.id + (f.read ? 'r' : '') + (f.write ? 'w' : '')).join(' ')}`);
+      for (const file of document.getElementById('pick').files) {
+        const id = eng.detect(file, await head(file));
+        log(`${file.name} -> detect: ${id}`);
+      }
+    } catch (e) { log(String(e.stack || e), 'err'); }
+  });
+  document.getElementById('matrix').addEventListener('click', () => runRead().catch((e) => log(String(e.stack || e), 'err')));
+  document.getElementById('write').addEventListener('click', () => runWrite().catch((e) => log(String(e.stack || e), 'err')));
+  document.getElementById('errors').addEventListener('click', () => runErrors().catch((e) => log(String(e.stack || e), 'err')));
+  document.getElementById('routing').addEventListener('click', () => runRouting().catch((e) => log(String(e.stack || e), 'err')));
+  document.getElementById('all').addEventListener('click', async () => {
+    try { await runRead(); await runWrite(); await runErrors(); await runRouting(); log('DONE'); } catch (e) { log(String(e.stack || e), 'err'); }
+  });
+  log('ready');
+</script>
+</body>
+</html>

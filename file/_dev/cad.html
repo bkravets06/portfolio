@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>model-cad engine test</title>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js",
+            "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/"}}
+</script>
+<style>
+  body { font: 13px/1.4 ui-monospace, Menlo, monospace; margin: 16px; }
+  #log { white-space: pre-wrap; border: 1px solid #aaa; padding: 8px; min-height: 200px; }
+  .ok { color: #050; } .err { color: #a00; } .warn { color: #850; }
+</style>
+</head>
+<body>
+<h1>model-cad engine test</h1>
+<p>
+  <button id="load">1. load engine</button>
+  <button id="samples">2. make CAD samples</button>
+  <button id="tests">3. run tests</button>
+  <button id="big">4. big mesh (100k)</button>
+  <input type="file" id="pick" multiple> <button id="run">read picked</button>
+</p>
+<div id="log"></div>
+<script type="module">
+  const logEl = document.getElementById('log');
+  window.log = (msg, cls = '') => {
+    const line = document.createElement('div');
+    line.className = cls;
+    line.textContent = typeof msg === 'string' ? msg : JSON.stringify(msg);
+    logEl.appendChild(line);
+    console.log(msg);
+  };
+  window.results = {};
+  window.sample = async (name, type = '') => {
+    const res = await fetch(`/file/_dev/samples/${name}?v=${Date.now()}`);
+    if (!res.ok) throw new Error(`sample ${name}: HTTP ${res.status}`);
+    return new File([await res.blob()], name, { type });
+  };
+  window.head = async (file) => new Uint8Array(await file.slice(0, 64).arrayBuffer());
+  const V = Date.now();
+  window.engine = () => (window._engine ||= import(`../engines/model-cad.js?v=${V}`));
+
+  // ---- helpers -------------------------------------------------------------
+  const fmt = (n) => (Math.round(n * 100) / 100).toString();
+  const ms = (t) => `${Math.round(t)} ms`;
+
+  // Minimal binary STL -> MeshSet (non-indexed positions)
+  window.parseStl = async (file) => {
+    const buf = await file.arrayBuffer();
+    const dv = new DataView(buf);
+    const n = dv.getUint32(80, true);
+    if (84 + n * 50 !== buf.byteLength) throw new Error(`not a binary STL: ${file.name}`);
+    const positions = new Float32Array(n * 9);
+    for (let i = 0, o = 84; i < n; i++, o += 50) {
+      for (let k = 0; k < 9; k++) positions[i * 9 + k] = dv.getFloat32(o + 12 + k * 4, true);
+    }
+    return { units: 'mm', meshes: [{ name: file.name.replace(/\.stl$/i, ''), positions }] };
+  };
+
+  // Stats of a MeshSet mesh: triangle count, bbox, signed volume (positive = outward winding)
+  window.meshStats = (mesh) => {
+    const p = mesh.positions;
+    const idx = mesh.indices || Uint32Array.from({ length: p.length / 3 }, (_, i) => i);
+    const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < p.length; i += 3) for (let a = 0; a < 3; a++) { min[a] = Math.min(min[a], p[i + a]); max[a] = Math.max(max[a], p[i + a]); }
+    let vol = 0, badIdx = 0, badNormal = 0;
+    for (let k = 0; k < idx.length; k += 3) {
+      const a = idx[k] * 3, b = idx[k + 1] * 3, c = idx[k + 2] * 3;
+      if (a + 2 >= p.length || b + 2 >= p.length || c + 2 >= p.length) { badIdx++; continue; }
+      // a . (b x c) / 6
+      vol += (p[a] * (p[b + 1] * p[c + 2] - p[b + 2] * p[c + 1])
+            - p[a + 1] * (p[b] * p[c + 2] - p[b + 2] * p[c])
+            + p[a + 2] * (p[b] * p[c + 1] - p[b + 1] * p[c])) / 6;
+    }
+    if (mesh.normals) {
+      if (mesh.normals.length !== p.length) badNormal = -1;
+      else for (let i = 0; i < mesh.normals.length; i += 3) {
+        const l = Math.hypot(mesh.normals[i], mesh.normals[i + 1], mesh.normals[i + 2]);
+        if (Math.abs(l - 1) > 1e-3) badNormal++;
+      }
+    }
+    return { name: mesh.name, tris: idx.length / 3, verts: p.length / 3, bbox: [min.map(fmt), max.map(fmt)], volume: Math.round(vol), badIdx, badNormal };
+  };
+
+  window.blobText = async (blob, n = 4000) => (await blob.slice(0, n).text());
+  // gzip+base64 a Blob/Uint8Array so it can be copied out through the console
+  window.pack = async (data) => {
+    const blob = data instanceof Blob ? data : new Blob([data]);
+    const gz = await new Response(blob.stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
+    let s = ''; const u = new Uint8Array(gz);
+    for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
+    return btoa(s);
+  };
+  const memMB = (oc) => `wasm heap ${(oc.HEAPU8.length / 1048576).toFixed(0)} MB` +
+    (performance.memory ? `, js heap ${(performance.memory.usedJSHeapSize / 1048576).toFixed(0)} MB` : '');
+
+  let lastPct = -1;
+  const onProgress = (f, m) => {
+    if (f === null) { log(`   … ${m}`); return; }
+    const pct = Math.floor(f * 10) * 10;
+    if (pct !== lastPct) { lastPct = pct; log(`   … ${pct}% ${m || ''}`); }
+  };
+
+  // ---- 1. load ---------------------------------------------------------------
+  window.runLoad = async () => {
+    const eng = await engine();
+    log(`exports: ${Object.keys(eng).join(' ')}`);
+    log(`loadNote: ${eng.loadNote}`);
+    log(`cadFormats: ${eng.cadFormats.map((f) => `${f.id}[${f.ext}] ${f.read ? 'r' : ''}${f.write ? 'w' : ''} (${f.note})`).join(' | ')}`);
+    const t0 = performance.now();
+    const p1 = eng.warmup(); const p2 = eng.warmup();
+    log(`warmup idempotent: ${p1 === p2 ? 'same promise object' : 'different promise objects (still shares the load)'}`);
+    const oc = await eng.getOcc({ onProgress });
+    await p1;
+    const t = performance.now() - t0;
+    log(`engine loaded in ${ms(t)} (loadInfo.loadMs=${eng.loadInfo.loadMs}); ${memMB(oc)}`, 'ok');
+    window.oc = oc;
+    return { loadMs: Math.round(t) };
+  };
+
+  // ---- 2. samples from OCC primitives ---------------------------------------
+  window.makeSamples = async () => {
+    const eng = await engine();
+    const oc = await eng.getOcc();
+    const { writeShape } = eng._internals;
+    const prims = {
+      box_20x30x40: () => new oc.BRepPrimAPI_MakeBox_2(20, 30, 40),
+      sphere_r15: () => new oc.BRepPrimAPI_MakeSphere_1(15),
+      cylinder_r10_h25: () => new oc.BRepPrimAPI_MakeCylinder_1(10, 25),
+    };
+    window.results.samples = {};
+    for (const [name, make] of Object.entries(prims)) {
+      const maker = make();
+      const shape = maker.Shape();
+      for (const f of ['step', 'iges', 'brep']) {
+        const bytes = writeShape(oc, shape, f, name);
+        const ext = f === 'iges' ? 'igs' : f;
+        window.results.samples[`${name}.${ext}`] = bytes;
+        log(`sample ${name}.${ext}: ${bytes.length} bytes, head: ${JSON.stringify(new TextDecoder().decode(bytes.subarray(0, 40)))}`);
+      }
+      shape.delete(); maker.delete();
+    }
+    return Object.fromEntries(Object.entries(window.results.samples).map(([k, v]) => [k, v.length]));
+  };
+
+  const fileFrom = (name, bytes, type = '') => new File([bytes], name, { type });
+  const idOf = (name) => ({ step: 'step', stp: 'step', igs: 'iges', iges: 'iges', brep: 'brep' })[name.split('.').pop()];
+
+  // ---- 3. tests ---------------------------------------------------------------
+  window.runTests = async () => {
+    const eng = await engine();
+    const oc = await eng.getOcc();
+    const summary = { pass: 0, fail: 0, lines: [] };
+    const check = (cond, what) => { summary[cond ? 'pass' : 'fail']++; summary.lines.push(`${cond ? 'PASS' : 'FAIL'} ${what}`); log(`${cond ? 'PASS' : 'FAIL'} ${what}`, cond ? 'ok' : 'err'); };
+    const approx = (a, b, tol) => Math.abs(a - b) <= tol;
+    const expectBox = { box_20x30x40: { bbox: [[0, 0, 0], [20, 30, 40]], vol: 24000 },
+                        sphere_r15: { bbox: [[-15, -15, -15], [15, 15, 15]], vol: 4 / 3 * Math.PI * 15 ** 3 },
+                        cylinder_r10_h25: { bbox: [[-10, -10, 0], [10, 10, 25]], vol: Math.PI * 100 * 25 } };
+    const bboxOk = (st, exp, tol = 0.05) => st.bbox[0].every((v, i) => approx(+v, exp[0][i], tol)) && st.bbox[1].every((v, i) => approx(+v, exp[1][i], tol));
+
+    if (!window.results.samples) await makeSamples();
+
+    // A. readCad on every generated sample
+    for (const [name, bytes] of Object.entries(window.results.samples)) {
+      const base = name.replace(/\.[^.]+$/, '');
+      const exp = expectBox[base];
+      try {
+        const t0 = performance.now();
+        const ms0 = await eng.readCad(fileFrom(name, bytes), idOf(name), { deflection: 0.1, onProgress });
+        const t = performance.now() - t0;
+        const st = ms0.meshes.map(meshStats);
+        log(`readCad ${name}: ${ms(t)}, units=${ms0.units}, meshes=${ms0.meshes.length} ${JSON.stringify(st)}`);
+        const s = st[0];
+        check(ms0.meshes.length === 1 && s.name === 'Body1', `${name}: one mesh named Body1`);
+        check(bboxOk(s, exp.bbox, base === 'box_20x30x40' ? 0.01 : 0.11), `${name}: bbox ${JSON.stringify(s.bbox)} ≈ ${JSON.stringify(exp.bbox)} (within deflection)`);
+        check(s.volume > 0 && approx(s.volume, exp.vol, exp.vol * 0.02), `${name}: signed volume ${s.volume} ≈ ${Math.round(exp.vol)} (outward winding)`);
+        check(s.badIdx === 0 && s.badNormal === 0, `${name}: indices in range, unit normals`);
+        if (base === 'box_20x30x40') check(s.tris === 12, `${name}: box tessellates to 12 triangles (got ${s.tris})`);
+        window.results[`read_${name}`] = ms0;
+      } catch (e) { check(false, `readCad ${name} threw: ${e.message}`); console.error(e); }
+    }
+
+    // A2. deflection option changes density
+    try {
+      const bytes = window.results.samples['sphere_r15.step'];
+      const coarse = await eng.readCad(fileFrom('sphere_r15.step', bytes), 'step', { deflection: 1 });
+      const fine = await eng.readCad(fileFrom('sphere_r15.step', bytes), 'step', { deflection: 0.01 });
+      const c = meshStats(coarse.meshes[0]).tris, f = meshStats(fine.meshes[0]).tris;
+      check(c < f, `deflection option: coarse ${c} tris < fine ${f} tris`);
+    } catch (e) { check(false, `deflection option threw: ${e.message}`); }
+
+    // B. writeCad from STL cube -> STEP/IGES/BREP, then re-read
+    try {
+      const cubeSet = await parseStl(await sample('cube_20x30x40.stl'));
+      for (const f of ['step', 'iges', 'brep']) {
+        const t0 = performance.now();
+        const out = await eng.writeCad(cubeSet, f, { onProgress, fileName: 'cube_20x30x40' });
+        const t = performance.now() - t0;
+        const head = await blobText(out.blob, 400);
+        log(`writeCad cube -> ${f}: ${ms(t)}, ${out.blob.size} bytes, stats=${JSON.stringify(out.stats)}`);
+        log(`   head: ${JSON.stringify(head.slice(0, 120))}`);
+        window.results[`cube_${f}`] = out.blob;
+        if (f === 'step') {
+          const text = await out.blob.text();
+          check(text.startsWith('ISO-10303-21'), 'cube STEP starts with ISO-10303-21');
+          check(text.includes('MANIFOLD_SOLID_BREP'), 'cube STEP contains MANIFOLD_SOLID_BREP (watertight -> solid)');
+        }
+        if (f === 'brep') check(head.startsWith('DBRep_DrawableShape'), 'cube BREP starts with DBRep_DrawableShape');
+        if (f === 'iges') check(head.length >= 80 && head[72] === 'S', 'cube IGES has an S start section in column 73');
+        check(out.stats.meshes[0].solids === 1 && out.stats.meshes[0].skipped === 0, `cube ${f}: 1 solid, 0 skipped triangles`);
+        const back = await eng.readCad(fileFrom(`cube.${f}`, new Uint8Array(await out.blob.arrayBuffer())), f, {});
+        const st = meshStats(back.meshes[0]);
+        log(`   re-read ${f}: meshes=${back.meshes.length} ${JSON.stringify(st)}`);
+        check(back.meshes.length === 1 && st.tris === 12, `cube ${f} round-trip: 12 triangles (got ${st.tris})`);
+        check(bboxOk(st, [[0, 0, 0], [20, 30, 40]]), `cube ${f} round-trip: bbox ${JSON.stringify(st.bbox)}`);
+        check(approx(st.volume, 24000, 1), `cube ${f} round-trip: volume ${st.volume} (outward)`);
+      }
+    } catch (e) { check(false, `cube writeCad threw: ${e.message}`); console.error(e); }
+
+    // C. sphere 1k and 10k -> STEP, timing + round trip
+    for (const n of ['1k', '10k']) {
+      try {
+        const set = await parseStl(await sample(`sphere_r15_${n}.stl`));
+        const nTri = set.meshes[0].positions.length / 9;
+        const t0 = performance.now();
+        const out = await eng.writeCad(set, 'step', { onProgress });
+        const t = performance.now() - t0;
+        const s = out.stats.meshes[0];
+        log(`writeCad sphere ${n} (${nTri} tris) -> STEP: total ${ms(t)} [build ${ms(s.buildMs)}, sew ${ms(s.sewMs)} (sewn=${s.sewn}), write ${ms(out.stats.writeMs)}], ${(out.blob.size / 1048576).toFixed(1)} MB, verts=${s.vertices} comps=${s.components} closed=${s.closed} solids=${s.solids} shells=${s.shells} skipped=${s.skipped} flipped=${s.flipped}; ${memMB(oc)}`);
+        window.results[`sphere_${n}_timing`] = { nTri, totalMs: Math.round(t), buildMs: Math.round(s.buildMs), sewMs: Math.round(s.sewMs), writeMs: Math.round(out.stats.writeMs), bytes: out.blob.size };
+        check(s.solids === 1, `sphere ${n} STEP: sewn into 1 solid`);
+        const text = await out.blob.text();
+        check(text.includes('MANIFOLD_SOLID_BREP'), `sphere ${n} STEP contains MANIFOLD_SOLID_BREP`);
+        const t1 = performance.now();
+        const back = await eng.readCad(fileFrom('s.step', new Uint8Array(await out.blob.arrayBuffer())), 'step', {});
+        const st = meshStats(back.meshes[0]);
+        log(`   re-read: ${ms(performance.now() - t1)} ${JSON.stringify(st)}`);
+        check(st.tris === nTri, `sphere ${n} STEP round-trip: ${st.tris} triangles == ${nTri}`);
+        check(bboxOk(st, [[-15, -15, -15], [15, 15, 15]], 0.2), `sphere ${n} round-trip bbox ${JSON.stringify(st.bbox)}`);
+        check(st.volume > 0 && approx(st.volume, 4 / 3 * Math.PI * 15 ** 3, 4 / 3 * Math.PI * 15 ** 3 * 0.05), `sphere ${n} round-trip volume ${st.volume} > 0 (outward)`);
+      } catch (e) { check(false, `sphere ${n} writeCad threw: ${e.message}`); console.error(e); }
+    }
+
+    // D. two bodies + degenerate triangle
+    try {
+      const set = await parseStl(await sample('two_bodies_degenerate.stl'));
+      const out = await eng.writeCad(set, 'step', {});
+      const s = out.stats.meshes[0];
+      log(`two_bodies_degenerate -> STEP: ${JSON.stringify(out.stats)}`);
+      check(s.skipped === 1, `two bodies: 1 degenerate triangle skipped (got ${s.skipped})`);
+      check(s.solids === 2, `two bodies: 2 solids (got ${s.solids})`);
+      const back = await eng.readCad(fileFrom('t.step', new Uint8Array(await out.blob.arrayBuffer())), 'step', {});
+      const st = back.meshes.map(meshStats);
+      log(`   re-read: ${JSON.stringify(st)}`);
+      check(back.meshes.length === 2 && st[0].name === 'Body1' && st[1].name === 'Body2', `two bodies re-read as Body1 + Body2 (got ${back.meshes.length})`);
+      check(st.every((x) => x.volume > 0), 'both bodies wound outward');
+    } catch (e) { check(false, `two bodies threw: ${e.message}`); console.error(e); }
+
+    // D1. winding robustness: fully inverted cube (fixed by the volume sign), and
+    //     every other triangle flipped (falls back to sewing)
+    try {
+      const cube = await parseStl(await sample('cube_20x30x40.stl'));
+      const inv = new Float32Array(cube.meshes[0].positions);
+      for (let t = 0; t < inv.length; t += 9) for (let k = 0; k < 3; k++) { const x = inv[t + 3 + k]; inv[t + 3 + k] = inv[t + 6 + k]; inv[t + 6 + k] = x; }
+      const out = await eng.writeCad({ units: 'mm', meshes: [{ name: 'inverted', positions: inv }] }, 'brep', {});
+      const s = out.stats.meshes[0];
+      const back = await eng.readCad(fileFrom('i.brep', new Uint8Array(await out.blob.arrayBuffer())), 'brep', {});
+      const st = meshStats(back.meshes[0]);
+      check(s.flipped === 1 && s.solids === 1 && s.sewn === 0 && st.volume === 24000, `inverted cube: flipped=${s.flipped} solids=${s.solids} sewn=${s.sewn}, re-read volume ${st.volume}`);
+      const mixed = new Float32Array(cube.meshes[0].positions);
+      for (let t = 0; t < mixed.length; t += 18) for (let k = 0; k < 3; k++) { const x = mixed[t + 3 + k]; mixed[t + 3 + k] = mixed[t + 6 + k]; mixed[t + 6 + k] = x; }
+      const out2 = await eng.writeCad({ units: 'mm', meshes: [{ name: 'mixed', positions: mixed }] }, 'brep', {});
+      const s2 = out2.stats.meshes[0];
+      const back2 = await eng.readCad(fileFrom('m.brep', new Uint8Array(await out2.blob.arrayBuffer())), 'brep', {});
+      const st2 = meshStats(back2.meshes[0]);
+      check(s2.sewn === 1 && s2.solids === 1 && st2.volume === 24000, `mixed-winding cube: sewn=${s2.sewn} solids=${s2.solids}, re-read volume ${st2.volume} (sewing fallback)`);
+      // open surface (cube minus its top) -> shell, not solid
+      const open = cube.meshes[0].positions.subarray(0, 10 * 9);
+      const out3 = await eng.writeCad({ units: 'mm', meshes: [{ name: 'open', positions: open }] }, 'step', {});
+      const s3 = out3.stats.meshes[0];
+      const text3 = await out3.blob.text();
+      check(s3.solids === 0 && s3.shells === 1 && !text3.includes('MANIFOLD_SOLID_BREP') && text3.includes('SHELL_BASED_SURFACE_MODEL'), `open mesh: solids=${s3.solids} shells=${s3.shells}, STEP has SHELL_BASED_SURFACE_MODEL`);
+    } catch (e) { check(false, `winding tests threw: ${e.message}`); console.error(e); }
+
+    // D2. multi-mesh MeshSet -> compound
+    try {
+      const a = await parseStl(await sample('cube_20x30x40.stl'));
+      const b = await parseStl(await sample('sphere_r15_1k.stl'));
+      const set = { units: 'mm', meshes: [a.meshes[0], b.meshes[0]] };
+      const out = await eng.writeCad(set, 'brep', {});
+      const back = await eng.readCad(fileFrom('m.brep', new Uint8Array(await out.blob.arrayBuffer())), 'brep', {});
+      check(back.meshes.length === 2, `MeshSet with 2 meshes -> BREP -> 2 bodies (got ${back.meshes.length})`);
+    } catch (e) { check(false, `multi-mesh threw: ${e.message}`); console.error(e); }
+
+    // E. convertCad chain: box STEP -> IGES -> BREP -> STEP
+    try {
+      let cur = fileFrom('box_20x30x40.step', window.results.samples['box_20x30x40.step']);
+      const chain = [['step', 'iges'], ['iges', 'brep'], ['brep', 'step'], ['step', 'step']];
+      for (const [from, to] of chain) {
+        const t0 = performance.now();
+        const out = await eng.convertCad(cur, from, to, {});
+        const head = await blobText(out.blob, 100);
+        log(`convertCad ${from} -> ${to}: ${ms(performance.now() - t0)}, ${out.blob.size} bytes, head ${JSON.stringify(head.slice(0, 40))}`);
+        cur = fileFrom(`box.${to}`, new Uint8Array(await out.blob.arrayBuffer()));
+        const back = await eng.readCad(cur, to, {});
+        const st = meshStats(back.meshes[0]);
+        check(bboxOk(st, [[0, 0, 0], [20, 30, 40]]) && st.tris === 12, `convertCad ${from}->${to}: box survives (12 tris, bbox ${JSON.stringify(st.bbox)})`);
+        if (to === 'step') { const text = await out.blob.text(); check(text.startsWith('ISO-10303-21'), `convertCad ${from}->${to}: ISO-10303-21 header`); }
+      }
+    } catch (e) { check(false, `convertCad chain threw: ${e.message}`); console.error(e); }
+
+    // F. garbage / empty inputs
+    const garbage = new Uint8Array(3000); for (let i = 0; i < garbage.length; i++) garbage[i] = (i * 7919 + 13) & 0xff;
+    for (const [name, bytes, id] of [['garbage.step', garbage, 'step'], ['garbage.igs', garbage, 'iges'], ['garbage.brep', garbage, 'brep'],
+                                     ['text.step', new TextEncoder().encode('hello world\nthis is not a step file\n'), 'step'], ['empty.step', new Uint8Array(0), 'step']]) {
+      try {
+        await eng.readCad(fileFrom(name, bytes), id, {});
+        check(false, `${name}: should have thrown`);
+      } catch (e) {
+        check(e instanceof Error && /could not read|empty|no geometry/i.test(e.message), `${name}: readable error "${e.message}"`);
+      }
+    }
+    try { await eng.writeCad({ units: 'mm', meshes: [] }, 'step', {}); check(false, 'empty MeshSet should throw'); }
+    catch (e) { check(/no triangles/i.test(e.message), `empty MeshSet: "${e.message}"`); }
+    try { await eng.writeCad({ units: 'mm', meshes: [{ name: 'x', positions: new Float32Array([0, 0, 0, 1, 0, 0, 2, 0, 0]) }] }, 'step', {}); check(false, 'all-degenerate should throw'); }
+    catch (e) { check(/degenerate|usable/i.test(e.message), `all-degenerate mesh: "${e.message}"`); }
+
+    // G. engine still healthy afterwards
+    try {
+      const ms0 = await eng.readCad(fileFrom('box.step', window.results.samples['box_20x30x40.step']), 'step', {});
+      check(meshStats(ms0.meshes[0]).tris === 12, `engine healthy after errors; ${memMB(oc)}`);
+    } catch (e) { check(false, `post-error read threw: ${e.message}`); }
+
+    log(`SUMMARY: ${summary.pass} passed, ${summary.fail} failed`, summary.fail ? 'err' : 'ok');
+    window.results.summary = summary;
+    return summary;
+  };
+
+  // ---- 4. big mesh timing --------------------------------------------------------
+  window.runBig = async (name = 'sphere_r15_100k.stl', fmt = 'step', opts = {}) => {
+    const eng = await engine();
+    const oc = await eng.getOcc();
+    const set = await parseStl(await sample(name));
+    const nTri = set.meshes[0].positions.length / 9;
+    log(`big: ${name} ${nTri} tris -> ${fmt} (${JSON.stringify(opts)}); ${memMB(oc)}`);
+    const t0 = performance.now();
+    const out = await eng.writeCad(set, fmt, { onProgress, ...opts });
+    const t = performance.now() - t0;
+    const s = out.stats.meshes[0];
+    const r = { name, fmt, nTri, totalMs: Math.round(t), buildMs: Math.round(s.buildMs), sewMs: Math.round(s.sewMs), writeMs: Math.round(out.stats.writeMs), MB: +(out.blob.size / 1048576).toFixed(1), solids: s.solids, shells: s.shells, skipped: s.skipped, sewn: s.sewn, heapMB: Math.round(oc.HEAPU8.length / 1048576) };
+    log(`big result: ${JSON.stringify(r)}`, 'ok');
+    const t1 = performance.now();
+    const back = await eng.readCad(fileFrom(`big.${fmt}`, new Uint8Array(await out.blob.arrayBuffer())), fmt, {});
+    const st = meshStats(back.meshes[0]);
+    r.rereadMs = Math.round(performance.now() - t1); r.reread = st;
+    log(`big re-read: ${ms(r.rereadMs)} ${JSON.stringify(st)}; ${memMB(oc)}`);
+    window.results.big = r;
+    return r;
+  };
+
+  document.getElementById('load').addEventListener('click', () => runLoad().catch((e) => log(String(e.stack || e), 'err')));
+  document.getElementById('samples').addEventListener('click', () => makeSamples().catch((e) => log(String(e.stack || e), 'err')));
+  document.getElementById('tests').addEventListener('click', () => runTests().catch((e) => log(String(e.stack || e), 'err')));
+  document.getElementById('big').addEventListener('click', () => runBig().catch((e) => log(String(e.stack || e), 'err')));
+  document.getElementById('run').addEventListener('click', async () => {
+    try {
+      const eng = await engine();
+      for (const file of document.getElementById('pick').files) {
+        const id = eng.detectCad(file, await head(file));
+        log(`${file.name} -> detectCad: ${id}`);
+        if (id) { const m = await eng.readCad(file, id, { onProgress }); log(JSON.stringify(m.meshes.map(meshStats))); }
+      }
+    } catch (e) { log(String(e.stack || e), 'err'); }
+  });
+  log('ready — click "load engine" (downloads ~50 MB on first use)');
+</script>
+</body>
+</html>

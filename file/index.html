@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>File Converter</title>
+    <meta name="description" content="Convert images, audio, video and 3D models entirely in the browser.">
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="theme-color" content="#005500">
+    <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg">
+    <link rel="stylesheet" href="style.css">
+    <script type="importmap">
+    {"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js",
+                "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/"}}
+    </script>
+</head>
+<body>
+    <main class="phone" id="app">
+        <header class="statusbar" id="statusbar">File converter</header>
+        <nav class="segments" id="domains" aria-label="File type"></nav>
+
+        <section id="files">
+            <div class="strip">
+                <span>Files</span>
+                <button type="button" class="strip-action" id="clear" hidden>Clear</button>
+            </div>
+            <button type="button" class="dropzone" id="dropzone">
+                <span class="dropzone-title">Drop files here</span>
+                <span class="dropzone-hint" id="dropzone-hint">or tap to choose</span>
+            </button>
+            <div id="file-list"></div>
+        </section>
+
+        <section id="browse" hidden></section>
+        <section id="targets" hidden></section>
+        <section id="settings" hidden></section>
+        <div class="actions" id="actions"></div>
+        <p class="footnote" id="note" hidden></p>
+
+        <section>
+            <div class="strip"><span>Keyboard</span></div>
+            <div class="row keys"><kbd class="keycap">Enter</kbd><span>Convert</span></div>
+            <div class="row keys"><kbd class="keycap">Esc</kbd><span>Cancel</span></div>
+            <div class="row keys"><kbd class="keycap">Ctrl / &#8984; V</kbd><span>Paste an image from the clipboard</span></div>
+        </section>
+        <p class="footnote last">Everything runs in this browser tab. Files never leave your device. Large engines (FFmpeg, OpenCascade) are downloaded the first time they are needed and cached by the browser.</p>
+    </main>
+    <input type="file" id="picker" multiple hidden>
+    <script type="module" src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>image engine test</title>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js",
+            "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/"}}
+</script>
+<style>
+  body { font: 13px/1.4 ui-monospace, Menlo, monospace; margin: 16px; }
+  #log { white-space: pre-wrap; border: 1px solid #aaa; padding: 8px; min-height: 200px; }
+  .ok { color: #050; } .err { color: #a00; }
+  img, canvas { max-width: 200px; border: 1px solid #ccc; margin: 4px; vertical-align: top; background: repeating-conic-gradient(#ddd 0 25%, #fff 0 50%) 0 0/16px 16px; }
+</style>
+</head>
+<body>
+<h1>image engine test</h1>
+<p><input type="file" id="pick" multiple> <button id="run">Detect + convert to PNG</button></p>
+<div id="log"></div>
+<div id="gallery"></div>
+<script type="module">
+  const logEl = document.getElementById('log');
+  window.log = (msg, cls = '') => {
+    const line = document.createElement('div');
+    line.className = cls;
+    line.textContent = typeof msg === 'string' ? msg : JSON.stringify(msg);
+    logEl.appendChild(line);
+    console.log(msg);
+  };
+  window.results = {};
+  window.rows = [];
+
+  window.sample = async (name, type = '') => {
+    const res = await fetch(`/file/_dev/samples/${name}?v=${Date.now()}`);
+    if (!res.ok) throw new Error(`sample ${name}: HTTP ${res.status}`);
+    return new File([await res.blob()], name, { type });
+  };
+  window.head = async (file) => new Uint8Array(await file.slice(0, 64).arrayBuffer());
+  window.engine = (name = 'image') => import(`../engines/${name}.js?v=${Date.now()}`);
+  let engP = null;
+  window.eng = () => (engP ||= engine('image'));
+  window.reload = () => { engP = null; return eng(); };
+
+  // Upload an output blob to the scratch sink so it can be checked with ffmpeg/sips.
+  window.upload = async (name, blob) => {
+    try { const r = await fetch('http://127.0.0.1:8766/' + name, { method: 'PUT', body: blob }); return r.ok; }
+    catch (e) { return false; }
+  };
+
+  const MAGIC = {
+    png: [0x89,0x50,0x4e,0x47], jpeg: [0xff,0xd8,0xff], gif: [0x47,0x49,0x46,0x38], bmp: [0x42,0x4d],
+    webp: [0x52,0x49,0x46,0x46], tiff: [0x4d,0x4d,0x00,0x2a], ico: [0,0,1,0], qoi: [0x71,0x6f,0x69,0x66],
+    avif: null, jxl: null,
+  };
+  function magicOk(id, u8) {
+    if (id === 'avif') return String.fromCharCode(...u8.slice(4, 8)) === 'ftyp' && /avif|avis/.test(String.fromCharCode(...u8.slice(8, 32)));
+    if (id === 'jxl') return (u8[0] === 0xff && u8[1] === 0x0a) || (u8[0] === 0 && u8[1] === 0 && u8[2] === 0 && u8[3] === 0x0c && u8[4] === 0x4a);
+    const m = MAGIC[id]; return m.every((b, i) => u8[i] === b);
+  }
+
+  // Draw a decodable blob into a canvas and return dims + corner pixels.
+  async function pixelsOf(blob) {
+    const bmp = await createImageBitmap(blob);
+    const c = document.createElement('canvas'); c.width = bmp.width; c.height = bmp.height;
+    const ctx = c.getContext('2d'); ctx.drawImage(bmp, 0, 0);
+    const px = (x, y) => Array.from(ctx.getImageData(x, y, 1, 1).data);
+    const w = bmp.width, h = bmp.height;
+    const out = { w, h, TL: px(4, 4), TR: px(w - 5, 4), BL: px(4, h - 5), BR: px(w - 5, h - 5), C: px(w >> 1, h >> 1) };
+    bmp.close();
+    return { info: out, canvas: c };
+  }
+
+  // Re-decode an output: natively where Chrome can, otherwise through the engine (→ PNG) as a second opinion.
+  window.verify = async (blob, outputId) => {
+    const u8 = new Uint8Array(await blob.slice(0, 32).arrayBuffer());
+    const magic = magicOk(outputId, u8);
+    const nativeIds = new Set(['png', 'jpeg', 'gif', 'bmp', 'webp', 'ico', 'avif']);
+    let via = 'native';
+    let target = blob;
+    if (!nativeIds.has(outputId)) {
+      via = 'engine';
+      const e = await eng();
+      const f = new File([blob], 'out.' + outputId);
+      const id = e.detect(f, await head(f));
+      if (id !== outputId) throw new Error(`re-detect gave ${id}`);
+      target = (await e.convert({ file: f, inputId: id, outputId: 'png', options: {} })).blob;
+    }
+    const { info, canvas } = await pixelsOf(target);
+    return { magic, via, ...info, canvas };
+  };
+
+  window.convertOne = async (inputName, outputId, options = {}, opts = {}) => {
+    const e = await eng();
+    const file = await sample(inputName, opts.type || '');
+    const inputId = e.detect(file, await head(file));
+    const t0 = performance.now();
+    const msgs = [];
+    const ac = new AbortController();
+    if (opts.abortAfter) setTimeout(() => ac.abort(), opts.abortAfter);
+    const { blob, ext } = await e.convert({ file, inputId, outputId, options, onProgress: (f, m) => msgs.push([f, m]), signal: ac.signal });
+    const ms = Math.round(performance.now() - t0);
+    const outName = `${inputName.replace(/\W/g, '_')}__${JSON.stringify(options).replace(/\W/g, '')}.${ext || e.formats.find(f => f.id === outputId).ext[0]}`;
+    const v = await verify(blob, outputId);
+    const uploaded = await upload(outName, blob);
+    const row = { input: inputName, inputId, output: outputId, options, ms, size: blob.size, type: blob.type, uploaded: uploaded ? outName : false, ...v, canvas: undefined };
+    window.results[outName] = blob;
+    document.getElementById('gallery').appendChild(v.canvas);
+    v.canvas.title = outName;
+    return row;
+  };
+
+  window.runMatrix = async (inputs, outputs, options = {}, opts = {}) => {
+    const rows = [];
+    for (const i of inputs) for (const o of outputs) {
+      try {
+        const r = await convertOne(i, o, options, opts);
+        rows.push(r); window.rows.push(r);
+        log(`OK ${i} -> ${o} ${r.w}x${r.h} ${r.size}B ${r.ms}ms magic=${r.magic} via=${r.via} TL=${r.TL} TR=${r.TR}`, 'ok');
+      } catch (err) {
+        const r = { input: i, output: o, options, error: String(err && err.message || err) };
+        rows.push(r); window.rows.push(r);
+        log(`ERR ${i} -> ${o}: ${r.error}`, 'err');
+      }
+    }
+    window.lastMatrix = rows;
+    return rows;
+  };
+
+  window.detectAll = async (names) => {
+    const e = await eng();
+    const out = {};
+    for (const n of names) { const f = await sample(n); out[n] = e.detect(f, await head(f)); }
+    return out;
+  };
+
+  document.getElementById('run').addEventListener('click', async () => {
+    try {
+      const e = await eng();
+      log(`formats: ${e.formats.map(f => f.id + (f.read ? 'r' : '') + (f.write ? 'w' : '')).join(' ')}`);
+      for (const file of document.getElementById('pick').files) {
+        const id = e.detect(file, await head(file));
+        log(`${file.name} -> detect: ${id}`);
+        const { blob } = await e.convert({ file, inputId: id, outputId: 'png', options: {}, onProgress: (f, m) => log(`  progress ${f} ${m || ''}`) });
+        const v = await verify(blob, 'png');
+        log(`  -> png ${v.w}x${v.h} ${blob.size}B`, 'ok');
+        document.getElementById('gallery').appendChild(v.canvas);
+      }
+    } catch (e) { log(String(e.stack || e), 'err'); }
+  });
+  log('ready');
+</script>
+</body>
+</html>

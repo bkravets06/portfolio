@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>av engine test</title>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js",
+            "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/"}}
+</script>
+<style>
+  body { font: 13px/1.4 ui-monospace, Menlo, monospace; margin: 16px; }
+  #log { white-space: pre-wrap; border: 1px solid #aaa; padding: 8px; min-height: 200px; }
+  .ok { color: #050; } .err { color: #a00; } .dim { color: #777; }
+  #bar { width: 400px; height: 10px; border: 1px solid #888; } #bar > div { height: 100%; background: #4a8; width: 0; }
+  #media { display: flex; gap: 8px; flex-wrap: wrap; } #media video, #media img { max-width: 320px; border: 1px solid #ccc; }
+</style>
+</head>
+<body>
+<h1>av engine test</h1>
+<p><input type="file" id="pick" multiple> <button id="run">Detect picked</button>
+   <button id="warm">warmup()</button> <button id="cancel">cancel current</button></p>
+<div id="bar"><div></div></div><div id="msg" class="dim"></div>
+<div id="log"></div>
+<div id="media"></div>
+<script type="module">
+  const logEl = document.getElementById('log');
+  window.log = (msg, cls = '') => {
+    const line = document.createElement('div');
+    line.className = cls;
+    line.textContent = typeof msg === 'string' ? msg : JSON.stringify(msg);
+    logEl.appendChild(line);
+    console.log(msg);
+  };
+  window.results = {};                       // stash outputs here for inspection
+  window.progressLog = [];
+
+  window.sample = async (name, type = '') => {
+    const res = await fetch(`/file/_dev/samples/${name}?v=${Date.now()}`);
+    if (!res.ok) throw new Error(`sample ${name}: HTTP ${res.status}`);
+    return new File([await res.blob()], name, { type });
+  };
+  window.head = async (file) => new Uint8Array(await file.slice(0, 64).arrayBuffer());
+  window.engine = (name) => import(`../engines/${name}.js?v=${Date.now()}`);
+  window.eng = null;
+  window.loadEngine = async () => { window.eng = await engine('av'); return Object.keys(window.eng); };
+
+  const bar = document.querySelector('#bar > div'), msgEl = document.getElementById('msg');
+  window.onProgress = (f, m) => {
+    window.progressLog.push([f, m]);
+    bar.style.width = (f == null ? 0 : Math.round(f * 100)) + '%';
+    msgEl.textContent = (f == null ? '…' : Math.round(f * 100) + '%') + (m ? '  ' + m : '');
+  };
+
+  // Load a blob into <video>/<audio>/<img> and report what the browser sees.
+  window.mediaInfo = (blob, kind = 'video', timeoutMs = 8000) => new Promise((res) => {
+    const url = URL.createObjectURL(blob);
+    if (kind === 'img') {
+      const img = new Image();
+      img.onload = () => { res({ width: img.naturalWidth, height: img.naturalHeight }); document.getElementById('media').appendChild(img); };
+      img.onerror = () => res({ error: 'img decode failed' });
+      img.src = url; return;
+    }
+    const el = document.createElement(kind);
+    el.preload = 'metadata'; el.controls = true;
+    const t = setTimeout(() => res({ error: 'timeout: browser did not load metadata' }), timeoutMs);
+    el.onloadedmetadata = () => { clearTimeout(t); res({ duration: +el.duration.toFixed(3), width: el.videoWidth, height: el.videoHeight }); };
+    el.onerror = () => { clearTimeout(t); res({ error: el.error ? `${el.error.code} ${el.error.message}` : 'unknown' }); };
+    el.src = url;
+    if (kind === 'video') document.getElementById('media').appendChild(el);
+  });
+
+  // Decode the whole output inside the wasm ffmpeg (-f null): proves every frame / sample is readable,
+  // not just the header. Returns the highest frame= count seen in the stats lines.
+  window.decodeCheck = async (blob, ext) => {
+    const ff = await eng._internals.load();
+    const name = `dc_${Date.now()}.${ext}`;
+    await ff.writeFile(name, new Uint8Array(await blob.arrayBuffer()));
+    try {
+      const r = await eng._internals.exec(['-v', 'error', '-stats', '-i', name, '-f', 'null', '-']);
+      let frames = -1, size = -1;
+      for (const l of r.logs) { const m = /frame=\s*(\d+)/.exec(l); if (m) frames = Math.max(frames, +m[1]); const z = /size=\s*(\d+)/.exec(l); if (z) size = Math.max(size, +z[1]); }
+      const errors = r.logs.filter(l => /error|invalid|corrupt|missing|failed|could not/i.test(l) && !/^Aborted/.test(l)).slice(0, 3);
+      return { ret: r.ret, frames, errors };
+    } finally { try { await ff.deleteFile(name); } catch {} }
+  };
+
+  // Run raw ffmpeg args against a sample: $IN / $OUT placeholders. Returns size, ms, ret, probe of $OUT.
+  window.raw = async (sampleName, args, outName, { probe = true } = {}) => {
+    const eng = window.eng || await loadEngine() && window.eng;
+    const ff = await eng._internals.load();
+    const file = await sample(sampleName);
+    const inName = 'raw_in_' + sampleName;
+    await ff.writeFile(inName, new Uint8Array(await file.arrayBuffer()));
+    const t0 = performance.now();
+    const r = await eng._internals.exec(args.map(a => a === '$IN' ? inName : a === '$OUT' ? outName : a));
+    const ms = Math.round(performance.now() - t0);
+    let out = null; try { out = await ff.readFile(outName); } catch {}
+    try { await ff.deleteFile(inName); } catch {}
+    try { await ff.deleteFile(outName); } catch {}
+    const res = { ret: r.ret, ms, size: out ? out.length : 0, lastLogs: r.logs.filter(l => !/^Aborted/.test(l)).slice(-3) };
+    if (out && probe) res.probe = (await eng._internals.probeBlob(new Blob([out]), outName)).summary;
+    if (out) window.results['raw:' + outName] = new Blob([out]);
+    return res;
+  };
+
+  window.detectAll = async (names) => {
+    const eng = window.eng || await loadEngine() && window.eng;
+    const out = {};
+    for (const n of names) { try { const f = await sample(n); out[n] = eng.detect(f, await head(f)); } catch (e) { out[n] = 'ERR ' + e.message; } }
+    return out;
+  };
+
+  window.currentCtrl = null;
+  // Run one conversion; returns a serialisable summary (also stored in results[key]).
+  window.conv = async (sampleName, outputId, options = {}, { probe = true, media = null, inputId = null, file = null, decode = false } = {}) => {
+    const eng = window.eng || await loadEngine() && window.eng;
+    file = file || await sample(sampleName);
+    const inId = inputId || eng.detect(file, await head(file));
+    const key = `${sampleName}->${outputId}${Object.keys(options).length ? ' ' + JSON.stringify(options) : ''}`;
+    window.progressLog = [];
+    const ctrl = new AbortController(); window.currentCtrl = ctrl;
+    const t0 = performance.now();
+    let out;
+    try {
+      out = await eng.convert({ file, inputId: inId, outputId, options, onProgress: window.onProgress, signal: ctrl.signal });
+    } catch (e) {
+      const r = { key, inputId: inId, error: String(e && e.message || e), ms: Math.round(performance.now() - t0) };
+      log(`${key}: ERROR ${r.error} (${r.ms} ms)`, 'err'); window.results[key] = r; return r;
+    }
+    const ms = Math.round(performance.now() - t0);
+    const r = { key, inputId: inId, ext: out.ext, type: out.blob.type, size: out.blob.size, ms,
+                progressSamples: window.progressLog.length,
+                lastProgress: window.progressLog.length ? window.progressLog[window.progressLog.length - 1] : null,
+                inputSize: file.size };
+    if (probe) r.probe = await eng._internals.probeBlob(out.blob, 'verify.' + (out.ext || eng.formats.find(f => f.id === outputId).ext[0]));
+    if (media) r.media = await mediaInfo(out.blob, media);
+    if (decode) r.decode = await decodeCheck(out.blob, out.ext || eng.formats.find(f => f.id === outputId).ext[0]);
+    window.results[key] = { ...r, blob: out.blob };
+    log(`${key}: ${r.size} B in ${ms} ms` + (r.probe ? ` | ${r.probe.summary}` : '') + (r.media ? ` | media ${JSON.stringify(r.media)}` : '') + (r.decode ? ` | decode ${JSON.stringify(r.decode)}` : ''), r.probe && r.probe.error ? 'err' : 'ok');
+    return r;
+  };
+
+  document.getElementById('run').addEventListener('click', async () => {
+    try {
+      const eng = window.eng || (await loadEngine(), window.eng);
+      log(`formats: ${eng.formats.map(f => f.id + (f.read ? 'r' : '') + (f.write ? 'w' : '')).join(' ')}`);
+      for (const file of document.getElementById('pick').files) {
+        const id = eng.detect(file, await head(file));
+        log(`${file.name} -> detect: ${id}`);
+      }
+    } catch (e) { log(String(e.stack || e), 'err'); }
+  });
+  document.getElementById('warm').addEventListener('click', async () => {
+    const eng = window.eng || (await loadEngine(), window.eng);
+    const t0 = performance.now();
+    try { await eng.warmup('mp4'); log(`warmup ok in ${Math.round(performance.now() - t0)} ms`, 'ok'); }
+    catch (e) { log('warmup failed: ' + (e.stack || e), 'err'); }
+  });
+  document.getElementById('cancel').addEventListener('click', () => window.currentCtrl && window.currentCtrl.abort());
+  log('ready');
+</script>
+</body>
+</html>
