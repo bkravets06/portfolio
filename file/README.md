@@ -59,27 +59,22 @@ browser pane) unless stated otherwise.
 | UI | Exercised end-to-end with the stub engine and with real image and mesh conversions: batches, settings controls, progress, Cancel/Esc, per-file Save, ZIP building, pass-through, dark mode, 375 px layout. Not yet opened in Safari, Firefox or on a phone. |
 | `image.js` | **Verified** by its agent: 24 inputs × 10 outputs = 240 conversions re-decoded and checked (dimensions, EXIF orientation, alpha). HEIC only with macOS-made samples (no real iPhone photo). Safari-specific paths were exercised by forcing them in Chromium, not in Safari. |
 | `model-mesh.js`, `model.js` | **Verified** by its agent: 34/34 reads, 36/36 write→read round-trips (STL binary/ASCII, OBJ, PLY, GLB, glTF, 3MF, USDZ), 26 bad inputs rejected cleanly, 200k-triangle STL timings. CAD routing verified with real STEP→STL, STL→STEP and STEP→IGES through `model.js`. |
-| `model-cad.js` | **Partially verified.** Loads in ~1.4 s here; the three routes above work. Its own test suite (`_dev/cad.html`: IGES/BREP round-trips, timings at 1k/10k/100k triangles, the sewing fallback, garbage and truncated inputs, memory after a 100k case) was **never run to completion** — the agent was cut off mid-run twice. Everything runs synchronously on the main thread (see TODO 3). |
-| `av.js` | **Unverified.** Written and syntax-checked, but no conversion has ever been run through it in a browser; both attempts were cut off before the first test. Whether the core loads from blob URLs, which encoders the wasm build actually has, progress and cancel behaviour, and real speed are all unknown. Treat every claim in its comments as a hypothesis. |
+| `model-cad.js` | **Partially verified (2026-09-17).** A fresh Chromium run of `_dev/cad.html` produced 54 passing checks: STEP/IGES/BREP primitive reads, bboxes/normals/volumes, tessellation density, a STEP→IGES→BREP→STEP chain, malformed-input errors and post-error health. The IGES writer was fixed to use BRep mode: its former Faces mode wrote a sphere that OpenCascade could not tessellate; generated sphere IGES now re-reads as 1 body / 1,504 triangles with the correct bounds and volume. Six checks still 404 because their local STL fixtures are absent. Everything runs synchronously on the main thread (see TODO 3). |
+| `av.js` | **Verified (2026-09-17).** Blob-URL core warmup worked; its full 23-output re-encode matrix passed, with every output re-probed and decoded. MP4→WebM/GIF/MP3, MOV/MKV→MP4 at 480p/15 fps, WAV→MP3, MP3→FLAC, OGG→Opus and muted MP4 were individually checked. Garbage input gives a plain-English error; abort reports `Conversion cancelled.` and a later conversion succeeds; progress samples stayed in 0..1. A 10-second 720p MP4→480p/15 fps MP4 took 2.768 s and yielded 854×480 / 150 frames. `_dev/av.html` now has repeatable `?smoke=1` and `?matrix=1` runners. |
 
 ## TODO, in priority order
 
-1. **Verify `av.js` in the browser** with `_dev/av.html` (and then through the
-   page): the load mechanism (vendored wrapper + `toBlobURL` core, no
-   SharedArrayBuffer); `-encoders`/`-formats` inside the wasm build and prune
-   `formats` to what works; mp4→webm, mp4→gif, mp4→mp3 (soundtrack
-   extraction), mov/mkv→mp4 with resolution 480 + fps 15, wav→mp3 at 128 kbps,
-   mp3→flac, ogg→opus, mp4→mp4 with mute; garbage input → readable error;
-   cancel mid-way then a successful conversion; `onProgress` fractions in
-   0..1; throughput for a 10 s 720p clip (x264 in wasm is slow — use
-   ultrafast/veryfast). Re-probe every output (`-i` in the wasm ffmpeg, or
-   `<video>`/`<audio>` metadata).
-2. **Finish `model-cad.js` verification** (`_dev/cad.html`): STEP→IGES→STEP and
-   BREP round-trips; `readCad` triangle counts/bboxes at deflection 0.1 and
-   0.02; `writeCad` from ~1k/10k/100k-triangle STLs with timings, re-read and
-   checked, `MANIFOLD_SOLID_BREP` present for watertight input; the
-   `SEW_MAX_FACES` fallback; garbage/truncated STEP; a second large conversion
-   after the first (memory headroom).
+1. **Run the verified AV suite through the actual queue UI** (not just
+   `_dev/av.html`) with a multi-file batch, then repeat in Safari and Firefox
+   when available. The browser engine itself needs no format pruning: all 23
+   advertised outputs passed Chromium's matrix.
+2. **Restore complete `model-cad.js` coverage** (`_dev/cad.html`): either make
+   `gen_samples.py` create the expected `cube_20x30x40.stl`,
+   `sphere_r15_{1k,10k,100k}.stl`, and `two_bodies_degenerate.stl` fixtures, or
+   change the harness to use generated names. Then run mesh→CAD timing/re-read
+   cases, verify `MANIFOLD_SOLID_BREP` for watertight input, exercise the
+   `SEW_MAX_FACES` fallback (the current harness never invokes it), and check
+   memory headroom after a second large conversion.
 3. **Move OpenCascade off the main thread** (a module Worker holding the OCC
    instance; transfer the input `ArrayBuffer` and the `MeshSet` typed arrays;
    progress via `postMessage`; abort = `worker.terminate()` + a fresh instance).

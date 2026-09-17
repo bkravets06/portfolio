@@ -1031,7 +1031,10 @@ function writeShape(oc, shape, formatId, baseName, opts = {}) {
           if (!enumIs(wst, oc.IFSelect_ReturnStatus.IFSelect_RetDone)) throw new Error('The STEP file could not be written.');
         } finally { writer.delete(); }
       } else if (formatId === 'iges') {
-        const writer = new oc.IGESControl_Writer_2('MM', 0); // 0 = faces (trimmed surfaces, most portable)
+        // BRep mode preserves topology for curved solids. Faces mode (0) can
+        // write a syntactically valid IGES whose curved faces do not survive
+        // OpenCascade's own reader (for example, a sphere).
+        const writer = new oc.IGESControl_Writer_2('MM', 1); // 1 = BRep
         try {
           const ok = occTry(oc, 'Preparing the IGES data', () => writer.AddShape(shape, progress));
           if (!ok) throw new Error('The shape could not be translated to IGES.');

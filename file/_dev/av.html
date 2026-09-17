@@ -18,7 +18,7 @@
 <body>
 <h1>av engine test</h1>
 <p><input type="file" id="pick" multiple> <button id="run">Detect picked</button>
-   <button id="warm">warmup()</button> <button id="cancel">cancel current</button></p>
+   <button id="warm">warmup()</button> <button id="smoke">run smoke tests</button> <button id="cancel">cancel current</button></p>
 <div id="bar"><div></div></div><div id="msg" class="dim"></div>
 <div id="log"></div>
 <div id="media"></div>
@@ -128,9 +128,11 @@
       log(`${key}: ERROR ${r.error} (${r.ms} ms)`, 'err'); window.results[key] = r; return r;
     }
     const ms = Math.round(performance.now() - t0);
+    const numericProgress = window.progressLog.map(([f]) => f).filter((f) => f != null);
     const r = { key, inputId: inId, ext: out.ext, type: out.blob.type, size: out.blob.size, ms,
                 progressSamples: window.progressLog.length,
                 lastProgress: window.progressLog.length ? window.progressLog[window.progressLog.length - 1] : null,
+                progressInRange: numericProgress.every((f) => f >= 0 && f <= 1),
                 inputSize: file.size };
     if (probe) r.probe = await eng._internals.probeBlob(out.blob, 'verify.' + (out.ext || eng.formats.find(f => f.id === outputId).ext[0]));
     if (media) r.media = await mediaInfo(out.blob, media);
@@ -138,6 +140,54 @@
     window.results[key] = { ...r, blob: out.blob };
     log(`${key}: ${r.size} B in ${ms} ms` + (r.probe ? ` | ${r.probe.summary}` : '') + (r.media ? ` | media ${JSON.stringify(r.media)}` : '') + (r.decode ? ` | decode ${JSON.stringify(r.decode)}` : ''), r.probe && r.probe.error ? 'err' : 'ok');
     return r;
+  };
+
+  // The handoff's priority-one checks, using the locally generated samples.  This stays deliberately
+  // small: it verifies the encoders the engine advertises and re-probes each actual conversion.
+  window.runSmoke = async () => {
+    const eng = window.eng || (await loadEngine(), window.eng);
+    const encoders = await eng._internals.exec(['-hide_banner', '-encoders']);
+    const muxers = await eng._internals.exec(['-hide_banner', '-formats']);
+    // The wrapper does not forward `-encoders` / `-formats` listing text in every browser, but a zero
+    // return confirms the commands execute.  The re-encoded matrix below is the authoritative check.
+    log(`listing commands: encoders=${encoders.ret}, formats=${muxers.ret}`, encoders.ret === 0 && muxers.ret === 0 ? 'ok' : 'err');
+    const results = [];
+    results.push(await conv('clip.mp4', 'webm', { resolution: '480', fps: '15' }, { media: 'video', decode: true }));
+    results.push(await conv('clip.mp4', 'gif', { width: '480', fps: '10' }, { media: 'img', decode: true }));
+    results.push(await conv('clip.mp4', 'mp3', { bitrate: '128' }, { media: 'audio', decode: true }));
+    results.push(await conv('clip.mov', 'mp4', { resolution: '480', fps: '15' }, { media: 'video', decode: true }));
+    results.push(await conv('clip.mkv', 'mp4', { resolution: '480', fps: '15' }, { media: 'video', decode: true }));
+    results.push(await conv('tone.wav', 'mp3', { bitrate: '128' }, { media: 'audio', decode: true }));
+    results.push(await conv('tone.mp3', 'flac', {}, { media: 'audio', decode: true }));
+    results.push(await conv('tone.ogg', 'opus', {}, { media: 'audio', decode: true }));
+    results.push(await conv('clip.mp4', 'mp4', { mute: true, resolution: '480', fps: '15' }, { media: 'video', decode: true }));
+    const bad = await sample('garbage.bin');
+    results.push(await conv('garbage.bin', 'mp3', {}, { file: bad, inputId: 'mp3' }));
+    setTimeout(() => document.getElementById('cancel').click(), 750);
+    results.push(await conv('long.mp4', 'webm', { resolution: '480', fps: '15', reencode: true }, { media: 'video' }));
+    results.push(await conv('tone.wav', 'm4a', { bitrate: '128' }, { media: 'audio', decode: true }));
+    results.push(await conv('clip720.mp4', 'mp4', { resolution: '480', fps: '15', reencode: true }, { media: 'video', decode: true }));
+    const complete = results.filter((r) => !r.error).length;
+    const progressOk = results.filter((r) => !r.error).every((r) => r.progressInRange);
+    log(`smoke complete: ${complete}/${results.length}; progress samples in range: ${progressOk}`, complete === results.length - 2 && progressOk ? 'ok' : 'err');
+    return { results };
+  };
+
+  window.runMatrix = async () => {
+    const eng = window.eng || (await loadEngine(), window.eng);
+    const results = [];
+    for (const fmt of eng.formats.filter((f) => f.write)) {
+      const video = fmt.group === 'Video';
+      const opts = fmt.id === 'gif'
+        ? { width: '480', fps: '10' }
+        : video
+          ? { resolution: '480', fps: '15', reencode: true }
+          : { bitrate: '128', reencode: true };
+      results.push(await conv('clip.mp4', fmt.id, opts, { decode: true }));
+    }
+    const failed = results.filter((r) => r.error);
+    log(`matrix complete: ${results.length - failed.length}/${results.length}; failures: ${failed.map((r) => r.key + ': ' + r.error).join(' | ') || 'none'}`, failed.length ? 'err' : 'ok');
+    return results;
   };
 
   document.getElementById('run').addEventListener('click', async () => {
@@ -156,8 +206,11 @@
     try { await eng.warmup('mp4'); log(`warmup ok in ${Math.round(performance.now() - t0)} ms`, 'ok'); }
     catch (e) { log('warmup failed: ' + (e.stack || e), 'err'); }
   });
+  document.getElementById('smoke').addEventListener('click', () => window.runSmoke().catch((e) => log(String(e.stack || e), 'err')));
   document.getElementById('cancel').addEventListener('click', () => window.currentCtrl && window.currentCtrl.abort());
   log('ready');
+  if (new URLSearchParams(location.search).has('smoke')) window.runSmoke().catch((e) => log(String(e.stack || e), 'err'));
+  if (new URLSearchParams(location.search).has('matrix')) window.runMatrix().catch((e) => log(String(e.stack || e), 'err'));
 </script>
 </body>
 </html>

@@ -31,9 +31,11 @@ function el(tag, attrs = {}, ...children) {
 const state = {
     engines: [],      // loaded engine modules, in ENGINE_NAMES order
     failed: [],       // engine names that failed to load
+    enginesLoading: true,
     browse: 'image',  // domain shown when no files are loaded
     files: [],        // { id, file, engine, inputId, status, progress, message, result }
     target: null,     // output format id
+    targetEngine: null, // engine id that owns target/options (format ids can overlap)
     opts: {},         // option values for (batch engine, target)
     running: false,
     abort: null,
@@ -67,6 +69,7 @@ async function loadEngines() {
     if (!state.engines.some((e) => e.domain.id === state.browse) && state.engines[0]) {
         state.browse = state.engines[0].domain.id;
     }
+    state.enginesLoading = false;
 }
 
 const formatOf = (engine, id) => engine.formats.find((f) => f.id === id);
@@ -119,11 +122,19 @@ function reconcile() {
             item.message = '';
         }
     }
-    if (state.target && !targetList().some((f) => f.id === state.target)) setTarget(null, false);
-    if (!batchEngine() && state.target) setTarget(null, false);
+    // Format ids are only unique inside an engine (both image and AV use
+    // "gif"), so do not carry a target or its options into a new batch engine.
+    if (state.target && state.targetEngine !== engine?.domain.id) setTarget(null, false, false);
+    if (state.target && !targetList().some((f) => f.id === state.target)) setTarget(null, false, false);
+    if (!batchEngine() && state.target) setTarget(null, false, false);
 }
 
 async function addFiles(fileList) {
+    if (state.running) return;
+    // A fast drop immediately after page load used to be classified against an
+    // empty engine list. Detection must wait for the same startup work as UI.
+    await enginesReady;
+    if (state.running) return;
     const files = Array.from(fileList || []).filter((f) => f && f.size >= 0);
     if (!files.length) return;
     for (const file of files) {
@@ -198,11 +209,20 @@ function loadOpts(engine, targetId) {
     return values;
 }
 
-function setOpt(def, value) {
-    state.opts[def.id] = coerce(def, value);
+function setOpt(def, value, invalidate = true) {
+    const next = coerce(def, value);
+    if (state.opts[def.id] === next && !invalidate) return;
+    state.opts[def.id] = next;
     const engine = batchEngine();
     if (engine && state.target) {
         try { localStorage.setItem(storageKey(engine, state.target), JSON.stringify(state.opts)); } catch { /* ignore */ }
+    }
+    // Results encode the prior settings. Clear them as soon as a committed
+    // setting changes so the action area offers another conversion instead of
+    // presenting stale output as current.
+    if (invalidate && state.files.some((item) => item.status === 'done' || item.status === 'error')) {
+        clearCompletedResults();
+        render();
     }
 }
 
@@ -214,10 +234,7 @@ function fmtOpt(def, value) {
 
 // ---- target ----------------------------------------------------------------
 
-function setTarget(id, rerender = true) {
-    state.target = id;
-    const engine = batchEngine();
-    state.opts = engine && id ? loadOpts(engine, id) : {};
+function clearCompletedResults() {
     for (const item of state.files) {
         if (item.status === 'done' || item.status === 'error') {
             item.status = 'ready';
@@ -226,6 +243,14 @@ function setTarget(id, rerender = true) {
             item.progress = null;
         }
     }
+}
+
+function setTarget(id, rerender = true, discardResults = true) {
+    state.target = id;
+    const engine = batchEngine();
+    state.targetEngine = engine && id ? engine.domain.id : null;
+    state.opts = engine && id ? loadOpts(engine, id) : {};
+    if (discardResults) clearCompletedResults();
     if (engine && id && typeof engine.warmup === 'function') {
         const first = activeItems()[0];
         Promise.resolve().then(() => engine.warmup(id, first?.inputId)).catch((err) => console.warn('warmup', err));
@@ -403,7 +428,7 @@ function renderDomains() {
     }
     $('#dropzone-hint').textContent = state.engines.length
         ? `or tap to choose · ${state.engines.map((e) => e.domain.name.toLowerCase()).join(' · ')}`
-        : 'no conversion engines could be loaded';
+        : state.enginesLoading ? 'loading conversion engines…' : 'no conversion engines could be loaded';
 }
 
 function renderFiles() {
@@ -541,7 +566,10 @@ function renderSettings() {
             const out = el('output', { text: fmtOpt(def, value) });
             const input = el('input', {
                 type: 'range', min: def.min, max: def.max, step: def.step ?? 1, value, disabled: state.running,
-                oninput: (e) => { setOpt(def, e.target.value); out.textContent = fmtOpt(def, state.opts[def.id]); },
+                // Do not rebuild the control during a drag. Commit the
+                // setting (and invalidate old results) only when the drag ends.
+                oninput: (e) => { setOpt(def, e.target.value, false); out.textContent = fmtOpt(def, state.opts[def.id]); },
+                onchange: (e) => setOpt(def, e.target.value),
             });
             row.append(el('span', { class: 'range-wrap' }, input, out));
         } else if (def.type === 'number') {
@@ -639,7 +667,8 @@ function wire() {
 
 wire();
 render();
-loadEngines().then(render);
+const enginesReady = loadEngines();
+enginesReady.then(render);
 
 // Handy from the console and for tests.
 window.fileConverter = { addFiles, state };
